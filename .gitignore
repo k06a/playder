@@ -1,0 +1,6 @@
+/target
+*.frag
+*.glsl
+*.vert
+*.mp4
+*.raw
