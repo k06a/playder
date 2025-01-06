@@ -7,69 +7,53 @@ use glutin::ContextBuilder;
 use std::io::{self, Write};
 use clap::{App, Arg};
 
+// Universal approach to OpenGL error handling
+// Wrap every all into gl_safe!(...) instead of unsafe { ... }
 macro_rules! gl_safe {
-    ($block:block) => {
-        gl_safe!($block, "")
-    };
-    ($block:block, $step_name:expr) => {{
-        let result = unsafe { (|| $block)() };
-        unsafe {
-            let err_code = gl::GetError();
-            if err_code != gl::NO_ERROR {
-                if $step_name.is_empty() {
-                    eprintln!("OpenGL error code {}", err_code);
-                    panic!("OpenGL error code {}", err_code);
-                } else {
-                    eprintln!("OpenGL error code {} at {}", err_code, $step_name);
-                    panic!("OpenGL error code {} at {}", err_code, $step_name);
-                }
-            }
+    (gl::CompileShader(_shader:expr), $step_name:expr) => {{
+        let $shader = _shader; // compute expression once
+        let result = unsafe { gl::CompileShader($shader) };
+        
+        // Check for compilation errors
+        let mut success = gl::FALSE as gl::types::GLint;
+        unsafe { gl::GetShaderiv($shader, gl::COMPILE_STATUS, &mut success);}
+        if success != gl::TRUE as gl::types::GLint {
+            let mut len = 0;
+            unsafe { gl::GetShaderiv($shader, gl::INFO_LOG_LENGTH, &mut len); }
+            let mut buffer = vec![0u8; len as usize];
+            unsafe { gl::GetShaderInfoLog($shader, len, ptr::null_mut(), buffer.as_mut_ptr() as *mut GLchar); }
+            
+            panic!("Shader compilation failed at \"{}\": {}. Check the shader source code for errors.", $step_name, str::from_utf8(&buffer).unwrap());
         }
         result
     }};
-}
+    (gl::load_with($func:expr), $step_name:expr) => {{
+        let result = gl::load_with($func); // safe call
 
-// Same as gl_safe, but without unsafe block
-macro_rules! gl_saint {
-    ($block:block) => {
-        gl_saint!($block, "")
-    };
-    ($block:block, $step_name:expr) => {{
-        let result = (|| $block)();
-        unsafe {
-            let err_code = gl::GetError();
-            if err_code != gl::NO_ERROR {
-                if $step_name.is_empty() {
-                    eprintln!("OpenGL error code {}", err_code);
-                    panic!("OpenGL error code {}", err_code);
-                } else {
-                    eprintln!("OpenGL error code {} at {}", err_code, $step_name);
-                    panic!("OpenGL error code {} at {}", err_code, $step_name);
-                }
-            }
+        // Check for errors
+        let err_code = unsafe { gl::GetError() };
+        if err_code != gl::NO_ERROR {
+            panic!("OpenGL error code {} at \"{}\"", err_code, $step_name);
+        }
+        result
+    }};
+    ($block:expr, $step_name:expr) => {{
+        let result = unsafe { $block };
+
+        // Check for errors
+        let err_code = unsafe { gl::GetError() };
+        if err_code != gl::NO_ERROR {
+            panic!("OpenGL error code {} at \"{}\"", err_code, $step_name);
         }
         result
     }};
 }
 
 fn compile_shader(src: &str, ty: GLenum) -> GLuint {
-    let shader = gl_safe!({ gl::CreateShader(ty) }, "creating shader");
+    let shader = gl_safe!(gl::CreateShader(ty), "create shader: initialize a new shader object. Ensure the shader type is correct.");
     let c_str = CString::new(src.as_bytes()).unwrap();
-    gl_safe!({ gl::ShaderSource(shader, 1, &c_str.as_ptr(), ptr::null()) }, "setting shader source");
-    gl_safe!({ gl::CompileShader(shader) }, "compiling shader");
-
-    // Check for compilation errors
-    let mut success = gl::FALSE as GLint;
-    gl_safe!({ gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success) }, "checking shader compile status");
-    if success != gl::TRUE as GLint {
-        let mut len = 0;
-        gl_safe!({ gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len) }, "getting shader info log length");
-        let mut buffer = vec![0u8; len as usize];
-        gl_safe!({ gl::GetShaderInfoLog(shader, len, ptr::null_mut(), buffer.as_mut_ptr() as *mut GLchar) }, "getting shader info log");
-        
-        eprintln!("Shader compilation failed: {}", str::from_utf8(&buffer).unwrap());
-        panic!("Shader compilation failed");
-    }
+    gl_safe!(gl::ShaderSource(shader, 1, &c_str.as_ptr(), ptr::null()), "set shader source: provide source code to shader. Ensure the source is valid GLSL.");
+    gl_safe!(gl::CompileShader(shader), "compile shader: compile the shader source code.");
     shader
 }
 
@@ -117,7 +101,7 @@ fn main() {
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
     // Load OpenGL functions
-    gl_saint!({ gl::load_with(|symbol| windowed_context.get_proc_address(symbol) as *const _) }, "loading OpenGL functions");
+    gl_safe!(gl::load_with(|symbol| windowed_context.get_proc_address(symbol) as *const _), "loading OpenGL functions");
 
     // Load and compile vertex shader source from constant
     let vertex_shader_src = "#version 330 core\nlayout (location = 0) in vec3 aPos;\nvoid main() {\ngl_Position = vec4(aPos, 1.0);\n}";
@@ -128,60 +112,58 @@ fn main() {
     let fs = compile_shader(&fs_src, gl::FRAGMENT_SHADER);
 
     // Create a program and attach the fragment shader
-    let program = gl_safe!({ gl::CreateProgram() }, "creating program");
-    gl_safe!({ gl::AttachShader(program, vs) }, "attaching vertex shader to program");
-    gl_safe!({ gl::AttachShader(program, fs) }, "attaching shader to program");
-    gl_safe!({ gl::LinkProgram(program) }, "linking program");
-    gl_safe!({ gl::UseProgram(program) }, "using shader program");
+    let program = gl_safe!(gl::CreateProgram(), "create program");
+    gl_safe!(gl::AttachShader(program, vs), "attach vertex shader: link vertex shader to program");
+    gl_safe!(gl::AttachShader(program, fs), "attach fragment shader: link fragment shader to program");
+    gl_safe!(gl::LinkProgram(program), "link program: link all attached shaders");
+    gl_safe!(gl::UseProgram(program), "use program: activate the shader program");
 
     // Check for linking errors
     let mut success = gl::FALSE as GLint;
-    gl_safe!({ gl::GetProgramiv(program, gl::LINK_STATUS, &mut success) }, "checking program link status");
+    gl_safe!(gl::GetProgramiv(program, gl::LINK_STATUS, &mut success), "check link status: verify program linking success");
     if success != gl::TRUE as GLint {
         let mut len = 0;
-        gl_safe!({ gl::GetProgramiv(program, gl::INFO_LOG_LENGTH, &mut len) }, "getting program info log length");
+        gl_safe!(gl::GetProgramiv(program, gl::INFO_LOG_LENGTH, &mut len), "get program info log length: determine length of linking log");
         let mut buffer = vec![0u8; len as usize];
-        gl_safe!({ gl::GetProgramInfoLog(program, len, ptr::null_mut(), buffer.as_mut_ptr() as *mut GLchar) }, "getting program info log");
-        eprintln!("Program linking failed: {}", str::from_utf8(&buffer).unwrap());
-        panic!("Program linking failed");
+        gl_safe!(gl::GetProgramInfoLog(program, len, ptr::null_mut(), buffer.as_mut_ptr() as *mut GLchar), "get program info log: retrieve linking log");
+        
+        panic!("Program linking failed: {}. Verify that all shaders are correctly attached and compiled.", str::from_utf8(&buffer).unwrap());
     }
 
     // Use the shader program
-    gl_safe!({ gl::UseProgram(program) }, "using shader program");
+    gl_safe!(gl::UseProgram(program), "use shader program");
 
     // Create a framebuffer
     let mut framebuffer = 0;
-    gl_safe!({ gl::GenFramebuffers(1, &mut framebuffer) }, "generating framebuffer");
-    gl_safe!({ gl::BindFramebuffer(gl::FRAMEBUFFER, framebuffer) }, "binding framebuffer");
+    gl_safe!(gl::GenFramebuffers(1, &mut framebuffer), "generate framebuffer: create a new framebuffer object");
+    gl_safe!(gl::BindFramebuffer(gl::FRAMEBUFFER, framebuffer), "bind framebuffer: set the framebuffer as active");
 
     // Create a texture to render to
     let mut texture = 0;
-    gl_safe!({ gl::GenTextures(1, &mut texture) }, "generating texture");
-    gl_safe!({ gl::BindTexture(gl::TEXTURE_2D, texture) }, "binding texture");
-    gl_safe!({ gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB as i32, width as i32, height as i32, 0, gl::RGB, gl::UNSIGNED_BYTE, ptr::null()) }, "creating texture image");
-    gl_safe!({ gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32) }, "setting texture min filter");
-    gl_safe!({ gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32) }, "setting texture mag filter");
-    gl_safe!({ gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture, 0) }, "attaching texture to framebuffer");
+    gl_safe!(gl::GenTextures(1, &mut texture), "generate texture: create a new texture object");
+    gl_safe!(gl::BindTexture(gl::TEXTURE_2D, texture), "bind texture: set the texture as active");
+    gl_safe!(gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB as i32, width as i32, height as i32, 0, gl::RGB, gl::UNSIGNED_BYTE, ptr::null()), "create texture image: allocate storage for texture");
+    gl_safe!(gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32), "set texture min filter: define texture minification filter");
+    gl_safe!(gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32), "set texture mag filter: define texture magnification filter");
+    gl_safe!(gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture, 0), "attach texture to framebuffer: link texture to framebuffer");
 
     // Check if framebuffer is complete
-    if gl_safe!({ gl::CheckFramebufferStatus(gl::FRAMEBUFFER) }, "checking framebuffer status") != gl::FRAMEBUFFER_COMPLETE {
-        eprintln!("Framebuffer is not complete");
-        panic!("Framebuffer is not complete");
+    if gl_safe!(gl::CheckFramebufferStatus(gl::FRAMEBUFFER), "check framebuffer status: verify framebuffer completeness") != gl::FRAMEBUFFER_COMPLETE {
+        panic!("Framebuffer is not complete. Check framebuffer attachments and ensure they are correctly configured.");
     }
 
     // Set iResolution uniform
     let i_resolution_cstr = CString::new("iResolution").unwrap();
-    let i_resolution_loc = gl_safe!({ gl::GetUniformLocation(program, i_resolution_cstr.as_ptr()) }, "getting uniform location for iResolution");
+    let i_resolution_loc = gl_safe!(gl::GetUniformLocation(program, i_resolution_cstr.as_ptr()), "get iResolution location: find uniform location");
     if i_resolution_loc == -1 {
-        eprintln!("Failed to get uniform location for iResolution");
-        panic!("Failed to get uniform location for iResolution");
+        panic!("Failed to get uniform location for iResolution. Ensure the uniform variable is declared in the shader.");
     }
-    gl_safe!({ gl::Uniform3f(i_resolution_loc, width as f32, height as f32, 0.0) }, "setting iResolution uniform");
+    gl_safe!(gl::Uniform3f(i_resolution_loc, width as f32, height as f32, 0.0), "set iResolution uniform: set uniform value");
 
-    // Создаем вектор для пикселей один раз до начала цикла
+    // Create a vector for pixels once before the loop
     let mut pixels = vec![0u8; (width * height * 3) as usize];
 
-    // Создаем и настраиваем буфер вершин для прямоугольника
+    // Create and configure a vertex buffer for the rectangle
     let vertices: [f32; 12] = [
         -1.0, -1.0, 0.0,
          1.0, -1.0, 0.0,
@@ -191,43 +173,36 @@ fn main() {
 
     let mut vbo = 0;
     let mut vao = 0;
-    gl_safe!({ gl::GenVertexArrays(1, &mut vao) }, "generating VAO");
-    gl_safe!({ gl::GenBuffers(1, &mut vbo) }, "generating VBO");
+    gl_safe!(gl::GenVertexArrays(1, &mut vao), "generating VAO");
+    gl_safe!(gl::GenBuffers(1, &mut vbo), "generating VBO");
 
-    gl_safe!({ gl::BindVertexArray(vao) }, "binding VAO");
-    gl_safe!({ gl::BindBuffer(gl::ARRAY_BUFFER, vbo) }, "binding VBO");
-    gl_safe!({ gl::BufferData(gl::ARRAY_BUFFER, (vertices.len() * std::mem::size_of::<f32>()) as GLsizeiptr, vertices.as_ptr() as *const _, gl::STATIC_DRAW) }, "buffering vertex data");
-    gl_safe!({ gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, 3 * std::mem::size_of::<f32>() as GLsizei, ptr::null()) }, "setting vertex attrib pointer");
-    gl_safe!({ gl::EnableVertexAttribArray(0) }, "enabling vertex attrib array");
+    gl_safe!(gl::BindVertexArray(vao), "binding VAO");
+    gl_safe!(gl::BindBuffer(gl::ARRAY_BUFFER, vbo), "binding VBO");
+    gl_safe!(gl::BufferData(gl::ARRAY_BUFFER, (vertices.len() * std::mem::size_of::<f32>()) as GLsizeiptr, vertices.as_ptr() as *const _, gl::STATIC_DRAW), "buffering vertex data");
+    gl_safe!(gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, 3 * std::mem::size_of::<f32>() as GLsizei, ptr::null()), "setting vertex attrib pointer");
+    gl_safe!(gl::EnableVertexAttribArray(0), "enabling vertex attrib array");
 
     // Main rendering loop
     for frame in 0..(fps * duration) {
         let i_time = frame as f32 / fps as f32;
         let i_time_cstr = CString::new("iTime").unwrap();
-        let i_time_loc = gl_safe!({ gl::GetUniformLocation(program, i_time_cstr.as_ptr()) }, "getting uniform location for iTime");
+        let i_time_loc = gl_safe!(gl::GetUniformLocation(program, i_time_cstr.as_ptr()), "getting uniform location for iTime");
         if i_time_loc == -1 {
-            eprintln!("Failed to get uniform location for iTime");
-            panic!("Failed to get uniform location for iTime");
+            panic!("Failed to get uniform location for iTime. Ensure the uniform variable is declared in the shader.");
         }
-        gl_safe!({ gl::Uniform1f(i_time_loc, i_time) }, "setting uniform value for iTime");
+        gl_safe!(gl::Uniform1f(i_time_loc, i_time), "setting uniform value for iTime");
 
         // Render to the framebuffer
-        gl_safe!({ gl::Viewport(0, 0, width as i32, height as i32) }, "setting viewport");
-        gl_safe!({ gl::ClearColor(0.0, 0.0, 0.0, 1.0) }, "setting clear color");
-        gl_safe!({ gl::Clear(gl::COLOR_BUFFER_BIT) }, "clearing framebuffer");
+        gl_safe!(gl::Viewport(0, 0, width as i32, height as i32), "setting viewport");
+        gl_safe!(gl::ClearColor(0.0, 0.0, 0.0, 1.0), "setting clear color");
+        gl_safe!(gl::Clear(gl::COLOR_BUFFER_BIT), "clearing framebuffer");
 
-        // Рендерим прямоугольник
-        gl_safe!({ gl::BindVertexArray(vao) }, "binding vertex array");
-        gl_safe!({ gl::DrawArrays(gl::TRIANGLE_FAN, 0, 4) }, "drawing arrays");
+        // Render the rectangle
+        gl_safe!(gl::BindVertexArray(vao), "binding vertex array");
+        gl_safe!(gl::DrawArrays(gl::TRIANGLE_FAN, 0, 4), "drawing arrays");
 
         // Read pixels from the framebuffer
-        gl_safe!({ gl::ReadPixels(0, 0, width as i32, height as i32, gl::RGB, gl::UNSIGNED_BYTE, pixels.as_mut_ptr() as *mut _) }, "reading pixels");
-
-        // Check if all pixels are black
-        if pixels.iter().all(|&p| p == 0) {
-            eprintln!("All pixels are black");
-            panic!("All pixels are black");
-        }
+        gl_safe!(gl::ReadPixels(0, 0, width as i32, height as i32, gl::RGB, gl::UNSIGNED_BYTE, pixels.as_mut_ptr() as *mut _), "reading pixels");
 
         // Write pixels to stdout
         io::stdout().write_all(&pixels).unwrap();
