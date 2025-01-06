@@ -27,6 +27,23 @@ macro_rules! gl_safe {
         }
         result
     }};
+    (gl::LinkProgram(_program:expr), $step_name:expr) => {{
+        let $program = _program; // compute expression once
+        let result = unsafe { gl::LinkProgram($program) };
+        
+        // Check for linker errors
+        let mut success = gl::FALSE as GLint;
+        gl_safe!(gl::GetProgramiv($program, gl::LINK_STATUS, &mut success), "check link status: verify program linking success");
+        if success != gl::TRUE as GLint {
+            let mut len = 0;
+            gl_safe!(gl::GetProgramiv($program, gl::INFO_LOG_LENGTH, &mut len), "get program info log length: determine length of linking log");
+            let mut buffer = vec![0u8; len as usize];
+            gl_safe!(gl::GetProgramInfoLog($program, len, ptr::null_mut(), buffer.as_mut_ptr() as *mut GLchar), "get program info log: retrieve linking log");
+            
+            panic!("Program linking failed: {}. Verify that all shaders are correctly attached and compiled.", str::from_utf8(&buffer).unwrap());
+        }
+        result
+    }};
     (gl::load_with($func:expr), $step_name:expr) => {{
         let result = gl::load_with($func); // safe call
 
@@ -116,21 +133,6 @@ fn main() {
     gl_safe!(gl::AttachShader(program, vs), "attach vertex shader: link vertex shader to program");
     gl_safe!(gl::AttachShader(program, fs), "attach fragment shader: link fragment shader to program");
     gl_safe!(gl::LinkProgram(program), "link program: link all attached shaders");
-    gl_safe!(gl::UseProgram(program), "use program: activate the shader program");
-
-    // Check for linking errors
-    let mut success = gl::FALSE as GLint;
-    gl_safe!(gl::GetProgramiv(program, gl::LINK_STATUS, &mut success), "check link status: verify program linking success");
-    if success != gl::TRUE as GLint {
-        let mut len = 0;
-        gl_safe!(gl::GetProgramiv(program, gl::INFO_LOG_LENGTH, &mut len), "get program info log length: determine length of linking log");
-        let mut buffer = vec![0u8; len as usize];
-        gl_safe!(gl::GetProgramInfoLog(program, len, ptr::null_mut(), buffer.as_mut_ptr() as *mut GLchar), "get program info log: retrieve linking log");
-        
-        panic!("Program linking failed: {}. Verify that all shaders are correctly attached and compiled.", str::from_utf8(&buffer).unwrap());
-    }
-
-    // Use the shader program
     gl_safe!(gl::UseProgram(program), "use shader program");
 
     // Create a framebuffer
@@ -189,21 +191,18 @@ fn main() {
     // Create a vector for pixels once before the loop
     let mut pixels = vec![0u8; (width * height * 3) as usize];
 
-    // Render to the framebuffer
+    // Set viewport and clear color
     gl_safe!(gl::Viewport(0, 0, width as i32, height as i32), "setting viewport");
     gl_safe!(gl::ClearColor(0.0, 0.0, 0.0, 1.0), "setting clear color");
     gl_safe!(gl::Clear(gl::COLOR_BUFFER_BIT), "clearing framebuffer");
 
-    // Render the rectangle
+    // Bind vertex array
     gl_safe!(gl::BindVertexArray(vao), "binding vertex array");
 
     // Main rendering loop
     for frame in 0..(fps * duration) {
         // Set iTime uniform
         gl_safe!(gl::Uniform1f(i_time_loc, frame as f32 / fps as f32), "setting uniform value for iTime");
-
-        // Set iResolution uniform
-        gl_safe!(gl::Uniform3f(i_resolution_loc, width as f32, height as f32, 0.0), "set iResolution uniform: set uniform value");
 
         // Render the rectangle
         gl_safe!(gl::DrawArrays(gl::TRIANGLE_FAN, 0, 4), "drawing arrays");
