@@ -160,8 +160,12 @@ fn main() {
     }
     gl_safe!(gl::Uniform3f(i_resolution_loc, width as f32, height as f32, 0.0), "set iResolution uniform: set uniform value");
 
-    // Create a vector for pixels once before the loop
-    let mut pixels = vec![0u8; (width * height * 3) as usize];
+    // Get iTime uniform location to use inside of the render loop
+    let i_time_cstr = CString::new("iTime").unwrap();
+    let i_time_loc = gl_safe!(gl::GetUniformLocation(program, i_time_cstr.as_ptr()), "getting uniform location for iTime");
+    if i_time_loc == -1 {
+        panic!("Failed to get uniform location for iTime. Ensure the uniform variable is declared in the shader.");
+    }
 
     // Create and configure a vertex buffer for the rectangle
     let vertices: [f32; 12] = [
@@ -182,23 +186,26 @@ fn main() {
     gl_safe!(gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, 3 * std::mem::size_of::<f32>() as GLsizei, ptr::null()), "setting vertex attrib pointer");
     gl_safe!(gl::EnableVertexAttribArray(0), "enabling vertex attrib array");
 
+    // Create a vector for pixels once before the loop
+    let mut pixels = vec![0u8; (width * height * 3) as usize];
+
+    // Render to the framebuffer
+    gl_safe!(gl::Viewport(0, 0, width as i32, height as i32), "setting viewport");
+    gl_safe!(gl::ClearColor(0.0, 0.0, 0.0, 1.0), "setting clear color");
+    gl_safe!(gl::Clear(gl::COLOR_BUFFER_BIT), "clearing framebuffer");
+
+    // Render the rectangle
+    gl_safe!(gl::BindVertexArray(vao), "binding vertex array");
+
     // Main rendering loop
     for frame in 0..(fps * duration) {
-        let i_time = frame as f32 / fps as f32;
-        let i_time_cstr = CString::new("iTime").unwrap();
-        let i_time_loc = gl_safe!(gl::GetUniformLocation(program, i_time_cstr.as_ptr()), "getting uniform location for iTime");
-        if i_time_loc == -1 {
-            panic!("Failed to get uniform location for iTime. Ensure the uniform variable is declared in the shader.");
-        }
-        gl_safe!(gl::Uniform1f(i_time_loc, i_time), "setting uniform value for iTime");
+        // Set iTime uniform
+        gl_safe!(gl::Uniform1f(i_time_loc, frame as f32 / fps as f32), "setting uniform value for iTime");
 
-        // Render to the framebuffer
-        gl_safe!(gl::Viewport(0, 0, width as i32, height as i32), "setting viewport");
-        gl_safe!(gl::ClearColor(0.0, 0.0, 0.0, 1.0), "setting clear color");
-        gl_safe!(gl::Clear(gl::COLOR_BUFFER_BIT), "clearing framebuffer");
+        // Set iResolution uniform
+        gl_safe!(gl::Uniform3f(i_resolution_loc, width as f32, height as f32, 0.0), "set iResolution uniform: set uniform value");
 
         // Render the rectangle
-        gl_safe!(gl::BindVertexArray(vao), "binding vertex array");
         gl_safe!(gl::DrawArrays(gl::TRIANGLE_FAN, 0, 4), "drawing arrays");
 
         // Read pixels from the framebuffer
