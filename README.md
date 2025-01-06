@@ -2,8 +2,7 @@
 
 Playder is a tiny Rust tool for rendering fragment shaders into video files using OpenGL.
 
-![CI](https://github.com/yourusername/playder/actions/workflows/ci.yml/badge.svg)
-
+![CI](https://github.com/k06a/playder/actions/workflows/ci.yml/badge.svg)
 
 ## How it works
 
@@ -25,8 +24,8 @@ Playder is a tiny Rust tool for rendering fragment shaders into video files usin
 3. Then clone the repository and build the project:
 
     ```sh
-    # git clone https://github.com/k06a/playder
-    # cd playder
+    git clone https://github.com/k06a/playder
+    сd playder
     cargo build --release
     ```
 

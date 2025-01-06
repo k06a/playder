@@ -208,3 +208,100 @@ fn main() {
         io::stdout().write_all(&pixels).unwrap();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fs::File;
+    use std::process::Command;
+    
+    fn render_shader(test_name: &str, shader_source: &str, width: u32, height: u32, fps: u32, duration: u32) -> Result<Vec<u8>, String> {
+        // Write the shader source to a temporary file
+        let mut shader_path = env::temp_dir();
+        shader_path.push(format!("temp_shader_{}.frag", test_name)); // Use test name for unique filename
+        let mut file = File::create(&shader_path).expect(&format!("Failed to create shader file at {:?}", shader_path));
+        file.write_all(shader_source.as_bytes()).expect(&format!("Failed to write shader source at {:?}", shader_path));
+
+        // Run the rendering command
+        let output = Command::new("cargo")
+            .env("CARGO_TARGET_DIR", &format!("/tmp/playder_target_{}", test_name))
+            .args(&["run", "--", shader_path.to_str().unwrap(), &width.to_string(), &height.to_string(), &fps.to_string(), &duration.to_string()])
+            .output()
+            .expect("Failed to execute process");
+        
+        // Clean up the temporary shader file
+        std::fs::remove_file(shader_path).expect("Failed to remove temporary shader file");
+
+        output.status.success()
+            .then(|| output.stdout)
+            .ok_or_else(|| String::from_utf8_lossy(&output.stderr).to_string())
+    }
+
+    #[test]
+    fn test_render_1x1_5fps_1sec() {
+        // Embedded shader source
+        let shader_source = r#"
+        #version 330 core
+        uniform float iTime;
+        uniform vec3 iResolution;
+        out vec4 FragColor;
+        void main() {
+            FragColor = vec4(iTime, iResolution.x, iResolution.y, 1.0);
+        }
+        "#;
+
+        // Expected output
+        let expected_output = vec![
+            0, 255, 255,
+            51, 255, 255,
+            102, 255, 255,
+            153, 255, 255,
+            204, 255, 255,
+        ];
+
+        // Run the test
+        match render_shader("test_render_1x1_5fps_1sec", shader_source, 1, 1, 5, 1) {
+            Ok(output) => assert_eq!(output, expected_output),
+            Err(err) => panic!("Test failed with error: {}", err),
+        }
+    }
+
+    #[test]
+    fn test_missing_itime_uniform() {
+        // Shader source without iTime uniform
+        let shader_source = r#"
+        #version 330 core
+        uniform vec3 iResolution;
+        out vec4 FragColor;
+        void main() {
+            FragColor = vec4(iResolution.x, iResolution.y, 0.0, 1.0);
+        }
+        "#;
+
+        // Run the test
+        match render_shader("test_missing_itime_uniform", shader_source, 1, 1, 5, 1) {
+            Ok(_) => panic!("Test should have failed due to missing iTime uniform"),
+            Err(err) => assert!(err.contains("Failed to get uniform location for iTime"), "Unexpected error message: {}", err),
+        }
+    }
+
+    #[test]
+    fn test_missing_iresolution_uniform() {
+        // Shader source without iResolution uniform
+        let shader_source = r#"
+        #version 330 core
+        uniform float iTime;
+        out vec4 FragColor;
+        void main() {
+            FragColor = vec4(iTime, 0.0, 0.0, 1.0);
+        }
+        "#;
+
+        // Run the test
+        match render_shader("test_missing_iresolution_uniform", shader_source, 1, 1, 5, 1) {
+            Ok(_) => panic!("Test should have failed due to missing iResolution uniform"),
+            Err(err) => assert!(err.contains("Failed to get uniform location for iResolution"), "Unexpected error message: {}", err),
+        }
+    }
+}

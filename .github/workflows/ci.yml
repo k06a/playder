@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+      - '**'  # This will match every branch
+  pull_request:
+    branches:
+      - master
+      - '**'  # This will match pull requests to any branch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+
+    - name: Install OpenGL dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgl1-mesa-dev xorg-dev
+
+    - name: Install Vulkan drivers
+      run: |
+        sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
+
+    - name: Install Vulkan library
+      run: sudo apt-get install -y libvulkan1
+
+    - name: Start X virtual framebuffer
+      run: |
+        Xvfb :99 -screen 0 1024x768x24 &
+        export DISPLAY=:99
+
+    - name: Set DISPLAY environment variable
+      run: echo "DISPLAY=:99" >> $GITHUB_ENV
+
+    - name: Install additional dependencies
+      run: sudo apt-get install -y llvm libgl1 mesa-utils
+
+    - name: Configure software rendering
+      run: |
+        echo "LIBGL_ALWAYS_SOFTWARE=1" >> $GITHUB_ENV
+        echo "MESA_LOADER_DRIVER_OVERRIDE=llvmpipe" >> $GITHUB_ENV
+
+    - name: Build
+      run: cargo build --verbose
+
+    - name: Run tests
+      run: cargo test --verbose
