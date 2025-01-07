@@ -6,9 +6,10 @@ use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
 use std::io::{self, Write};
 use structopt::StructOpt;
+use std::ffi::CStr;
 
 // Universal approach to OpenGL error handling
-// Wrap every all into gl_safe!(...) instead of unsafe { ... }
+// Wrap every OpenGL call with gl_safe!(...) instead of unsafe { ... }
 macro_rules! gl_safe {
     (gl::CompileShader($shader:expr), $step_name:expr) => {{
         let shader = $shader; // compute expression once
@@ -123,7 +124,7 @@ fn main() {
     let mut texture = 0;
     gl_safe!(gl::GenTextures(1, &mut texture), "generate texture: create a new texture object");
     gl_safe!(gl::BindTexture(gl::TEXTURE_2D, texture), "bind texture: set the texture as active");
-    gl_safe!(gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB as i32, opt.width as i32, opt.height as i32, 0, gl::RGB, gl::UNSIGNED_BYTE, ptr::null()), "create texture image: allocate storage for texture");
+    gl_safe!(gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB8 as i32, opt.width as i32, opt.height as i32, 0, gl::RGB, gl::UNSIGNED_BYTE, ptr::null()), "create texture image: allocate storage for texture");
     gl_safe!(gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32), "set texture min filter: define texture minification filter");
     gl_safe!(gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32), "set texture mag filter: define texture magnification filter");
     gl_safe!(gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture, 0), "attach texture to framebuffer: link texture to framebuffer");
@@ -186,8 +187,15 @@ fn main() {
         // Render the rectangle
         gl_safe!(gl::DrawArrays(gl::TRIANGLE_FAN, 0, 4), "drawing arrays");
 
+        // Setup for reading pixels
+        // gl_safe!(gl::BindFramebuffer(gl::FRAMEBUFFER, framebuffer), "bind framebuffer");
+        // gl_safe!(gl::ReadBuffer(gl::COLOR_ATTACHMENT0), "read from color attachment 0");
+        // gl_safe!(gl::PixelStorei(gl::PACK_ALIGNMENT, 1), "set pack alignment to 1");
+        // gl_safe!(gl::PixelStorei(gl::PACK_ROW_LENGTH, 0), "set row length to 0");
+        // gl_safe!(gl::Finish(), "finish rendering");
+
         // Read pixels from the framebuffer
-        gl_safe!(gl::ReadPixels(0, 0, opt.width as i32, opt.height as i32, gl::RGB, gl::UNSIGNED_BYTE, pixels.as_mut_ptr() as *mut _), "reading pixels");
+        gl_safe!(gl::ReadPixels(0, 0, opt.width as i32, opt.height as i32, gl::RGB8, gl::UNSIGNED_BYTE, pixels.as_mut_ptr() as *mut _), "reading pixels");
 
         // Write pixels to stdout
         io::stdout().write_all(&pixels).unwrap();
