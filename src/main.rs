@@ -187,15 +187,8 @@ fn main() {
         // Render the rectangle
         gl_safe!(gl::DrawArrays(gl::TRIANGLE_FAN, 0, 4), "drawing arrays");
 
-        // Setup for reading pixels
-        // gl_safe!(gl::BindFramebuffer(gl::FRAMEBUFFER, framebuffer), "bind framebuffer");
-        // gl_safe!(gl::ReadBuffer(gl::COLOR_ATTACHMENT0), "read from color attachment 0");
-        // gl_safe!(gl::PixelStorei(gl::PACK_ALIGNMENT, 1), "set pack alignment to 1");
-        // gl_safe!(gl::PixelStorei(gl::PACK_ROW_LENGTH, 0), "set row length to 0");
-        // gl_safe!(gl::Finish(), "finish rendering");
-
         // Read pixels from the framebuffer
-        gl_safe!(gl::ReadPixels(0, 0, opt.width as i32, opt.height as i32, gl::RGB8, gl::UNSIGNED_BYTE, pixels.as_mut_ptr() as *mut _), "reading pixels");
+        gl_safe!(gl::ReadPixels(0, 0, opt.width as i32, opt.height as i32, gl::RGB, gl::UNSIGNED_BYTE, pixels.as_mut_ptr() as *mut _), "reading pixels");
 
         // Write pixels to stdout
         io::stdout().write_all(&pixels).unwrap();
