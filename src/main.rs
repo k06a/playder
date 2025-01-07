@@ -5,40 +5,40 @@ use std::str;
 use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
 use std::io::{self, Write};
-use clap::{App, Arg};
+use structopt::StructOpt;
 
 // Universal approach to OpenGL error handling
-// Wrap every all into gl_safe!(...) instead of unsafe { ... }
+// Wrap every OpenGL call with gl_safe!(...) instead of unsafe { ... }
 macro_rules! gl_safe {
-    (gl::CompileShader(_shader:expr), $step_name:expr) => {{
-        let $shader = _shader; // compute expression once
-        let result = unsafe { gl::CompileShader($shader) };
+    (gl::CompileShader($shader:expr), $step_name:expr) => {{
+        let shader = $shader; // compute expression once
+        let result = unsafe { gl::CompileShader(shader) };
         
         // Check for compilation errors
         let mut success = gl::FALSE as gl::types::GLint;
-        unsafe { gl::GetShaderiv($shader, gl::COMPILE_STATUS, &mut success);}
+        unsafe { gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success);}
         if success != gl::TRUE as gl::types::GLint {
             let mut len = 0;
-            unsafe { gl::GetShaderiv($shader, gl::INFO_LOG_LENGTH, &mut len); }
+            unsafe { gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len); }
             let mut buffer = vec![0u8; len as usize];
-            unsafe { gl::GetShaderInfoLog($shader, len, ptr::null_mut(), buffer.as_mut_ptr() as *mut GLchar); }
+            unsafe { gl::GetShaderInfoLog(shader, len, ptr::null_mut(), buffer.as_mut_ptr() as *mut GLchar); }
             
             panic!("Shader compilation failed at \"{}\": {}. Check the shader source code for errors.", $step_name, str::from_utf8(&buffer).unwrap());
         }
         result
     }};
-    (gl::LinkProgram(_program:expr), $step_name:expr) => {{
-        let $program = _program; // compute expression once
+    (gl::LinkProgram($program:expr), $step_name:expr) => {{
+        let program = $program; // compute expression once
         let result = unsafe { gl::LinkProgram($program) };
         
         // Check for linker errors
         let mut success = gl::FALSE as GLint;
-        gl_safe!(gl::GetProgramiv($program, gl::LINK_STATUS, &mut success), "check link status: verify program linking success");
+        gl_safe!(gl::GetProgramiv(program, gl::LINK_STATUS, &mut success), "check link status: verify program linking success");
         if success != gl::TRUE as GLint {
             let mut len = 0;
-            gl_safe!(gl::GetProgramiv($program, gl::INFO_LOG_LENGTH, &mut len), "get program info log length: determine length of linking log");
+            gl_safe!(gl::GetProgramiv(program, gl::INFO_LOG_LENGTH, &mut len), "get program info log length: determine length of linking log");
             let mut buffer = vec![0u8; len as usize];
-            gl_safe!(gl::GetProgramInfoLog($program, len, ptr::null_mut(), buffer.as_mut_ptr() as *mut GLchar), "get program info log: retrieve linking log");
+            gl_safe!(gl::GetProgramInfoLog(program, len, ptr::null_mut(), buffer.as_mut_ptr() as *mut GLchar), "get program info log: retrieve linking log");
             
             panic!("Program linking failed: {}. Verify that all shaders are correctly attached and compiled.", str::from_utf8(&buffer).unwrap());
         }
@@ -74,39 +74,18 @@ fn compile_shader(src: &str, ty: GLenum) -> GLuint {
     shader
 }
 
-fn main() {
-    // Parse command line arguments
-    let matches = App::new("Shader Renderer")
-        .version("1.0")
-        .author("Anton Bukov <k06aaa@gmail.com>")
-        .about("Renders a shader to a video file")
-        .arg(Arg::new("shader")
-            .help("Path to the shader file")
-            .required(true)
-            .index(1))
-        .arg(Arg::new("width")
-            .help("Width of the video")
-            .required(true)
-            .index(2))
-        .arg(Arg::new("height")
-            .help("Height of the video")
-            .required(true)
-            .index(3))
-        .arg(Arg::new("fps")
-            .help("Frames per second")
-            .required(true)
-            .index(4))
-        .arg(Arg::new("duration")
-            .help("Duration of the video in seconds")
-            .required(true)
-            .index(5))
-        .get_matches();
+#[derive(StructOpt, Debug)]
+#[structopt(name = "Shader Renderer", about = "Renders a fragment shader to a video file")]
+struct Opt {
+    shader_path: String,
+    width: u32,
+    height: u32,
+    fps: u32,
+    duration: u32,
+}
 
-    let shader_path = matches.value_of("shader").unwrap();
-    let width: u32 = matches.value_of("width").unwrap().parse().expect("Invalid width");
-    let height: u32 = matches.value_of("height").unwrap().parse().expect("Invalid height");
-    let fps: u32 = matches.value_of("fps").unwrap().parse().expect("Invalid fps");
-    let duration: u32 = matches.value_of("duration").unwrap().parse().expect("Invalid duration");
+fn main() {
+    let opt = Opt::from_args();
 
     // Create an invisible OpenGL context
     let el = glutin::event_loop::EventLoop::new();
@@ -125,7 +104,7 @@ fn main() {
     let vs = compile_shader(vertex_shader_src, gl::VERTEX_SHADER);
 
     // Load and compile fragment shader source from file
-    let fs_src = std::fs::read_to_string(shader_path).expect("Failed to read shader file");
+    let fs_src = std::fs::read_to_string(&opt.shader_path).expect("Failed to read shader file");
     let fs = compile_shader(&fs_src, gl::FRAGMENT_SHADER);
 
     // Create a program and attach the fragment shader
@@ -144,7 +123,7 @@ fn main() {
     let mut texture = 0;
     gl_safe!(gl::GenTextures(1, &mut texture), "generate texture: create a new texture object");
     gl_safe!(gl::BindTexture(gl::TEXTURE_2D, texture), "bind texture: set the texture as active");
-    gl_safe!(gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB as i32, width as i32, height as i32, 0, gl::RGB, gl::UNSIGNED_BYTE, ptr::null()), "create texture image: allocate storage for texture");
+    gl_safe!(gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGB as i32, opt.width as i32, opt.height as i32, 0, gl::RGB, gl::UNSIGNED_BYTE, ptr::null()), "create texture image: allocate storage for texture");
     gl_safe!(gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32), "set texture min filter: define texture minification filter");
     gl_safe!(gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32), "set texture mag filter: define texture magnification filter");
     gl_safe!(gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture, 0), "attach texture to framebuffer: link texture to framebuffer");
@@ -160,7 +139,7 @@ fn main() {
     if i_resolution_loc == -1 {
         panic!("Failed to get uniform location for iResolution. Ensure the uniform variable is declared in the shader.");
     }
-    gl_safe!(gl::Uniform3f(i_resolution_loc, width as f32, height as f32, 0.0), "set iResolution uniform: set uniform value");
+    gl_safe!(gl::Uniform3f(i_resolution_loc, opt.width as f32, opt.height as f32, 0.0), "set iResolution uniform: set uniform value");
 
     // Get iTime uniform location to use inside of the render loop
     let i_time_cstr = CString::new("iTime").unwrap();
@@ -188,27 +167,27 @@ fn main() {
     gl_safe!(gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, 3 * std::mem::size_of::<f32>() as GLsizei, ptr::null()), "setting vertex attrib pointer");
     gl_safe!(gl::EnableVertexAttribArray(0), "enabling vertex attrib array");
 
-    // Create a vector for pixels once before the loop
-    let mut pixels = vec![0u8; (width * height * 3) as usize];
-
     // Set viewport and clear color
-    gl_safe!(gl::Viewport(0, 0, width as i32, height as i32), "setting viewport");
+    gl_safe!(gl::Viewport(0, 0, opt.width as i32, opt.height as i32), "setting viewport");
     gl_safe!(gl::ClearColor(0.0, 0.0, 0.0, 1.0), "setting clear color");
     gl_safe!(gl::Clear(gl::COLOR_BUFFER_BIT), "clearing framebuffer");
 
     // Bind vertex array
     gl_safe!(gl::BindVertexArray(vao), "binding vertex array");
 
+    // Create a vector for pixels once before the loop
+    let mut pixels = vec![0u8; (opt.width * opt.height * 3) as usize];
+
     // Main rendering loop
-    for frame in 0..(fps * duration) {
+    for frame in 0..(opt.fps * opt.duration) {
         // Set iTime uniform
-        gl_safe!(gl::Uniform1f(i_time_loc, frame as f32 / fps as f32), "setting uniform value for iTime");
+        gl_safe!(gl::Uniform1f(i_time_loc, frame as f32 / opt.fps as f32), "setting uniform value for iTime");
 
         // Render the rectangle
         gl_safe!(gl::DrawArrays(gl::TRIANGLE_FAN, 0, 4), "drawing arrays");
 
         // Read pixels from the framebuffer
-        gl_safe!(gl::ReadPixels(0, 0, width as i32, height as i32, gl::RGB, gl::UNSIGNED_BYTE, pixels.as_mut_ptr() as *mut _), "reading pixels");
+        gl_safe!(gl::ReadPixels(0, 0, opt.width as i32, opt.height as i32, gl::RGB, gl::UNSIGNED_BYTE, pixels.as_mut_ptr() as *mut _), "reading pixels");
 
         // Write pixels to stdout
         io::stdout().write_all(&pixels).unwrap();
